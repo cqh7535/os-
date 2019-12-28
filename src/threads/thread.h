@@ -4,8 +4,8 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-#include "synch.h"
-#include "fixed_point.h"
+#include <threads/synch.h>
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -24,6 +24,23 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+//作为孩子元素的线程信息
+// 当原来线程被摧毁之后，仍然存在。只有当父进程读到他结束的状态之后，才释放。
+struct as_child_thread{
+    tid_t tid;
+    int exit_status;
+    struct list_elem child_thread_elem;
+    bool bewaited;
+    struct semaphore sema;
+};
+
+//被某个线程打开的文件
+struct opened_file{
+    int fd;
+    struct file* file;
+    struct list_elem file_elem;
+};
 
 /* A kernel thread or user process.
 
@@ -89,15 +106,11 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int64_t ticks_blocked;
     struct list_elem allelem;           /* List element for all threads list. */
-    int base_priority;                  /* 优先级 */
-    struct list locks;                  /* 进程占有的锁*/
-    struct lock *lock_waiting;          /* 进程请求的锁 */
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
-    int nice;  
-    fixed_t recent_cpu;
+
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -105,7 +118,21 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+
+
+    struct semaphore exec_sema; //用于exec同步，只有当子进程load成功后，父进程才能从exec返回
+    bool exec_success; //用于exec,判断子进程是否成功load its executable
+    struct thread* parent; //父进程
+    struct list childs; //子进程
+    int exit_status; //退出状态
+    struct list files;//打开的文件
+    struct file * self_file; //自己这个可执行文件
+    int next_fd; //可使用的文件描述符
+    struct as_child_thread * pointer_as_child_thread; //指向“作为孩子的struct”的指针
+
   };
+
+
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -120,10 +147,10 @@ void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
-void blocked_thread_check (struct thread *t, void *aux UNUSED);
+
 void thread_block (void);
 void thread_unblock (struct thread *);
-bool thread_cmp_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
 struct thread *thread_current (void);
 tid_t thread_tid (void);
 const char *thread_name (void);
@@ -137,15 +164,14 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+
 int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-void thread_hold_the_lock (struct lock *);
-void thread_remove_lock (struct lock *);
-void thread_donate_priority (struct thread *);
-void thread_update_priority (struct thread *);
-void thread_mlfqs_increase_recent_cpu_by_one (void);
-void thread_mlfqs_update_priority (struct thread *);
-void thread_mlfqs_update_load_avg_and_recent_cpu (void);
+
+void acquire_file_lock(void);
+void release_file_lock(void);
+
+
 #endif /* threads/thread.h */
